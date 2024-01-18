@@ -1,0 +1,18 @@
+{
+  "name" : "katengine",
+  "version-string" : "1.0.0",
+  "builtin-baseline" : "53bef8994c541b6561884a8395ea35715ece75db",
+  "dependencies" : [ {
+    "name" : "glfw3",
+    "version>=" : "3.3.8#2"
+  }, {
+    "name" : "spdlog",
+    "version>=" : "1.12.0"
+  }, {
+    "name" : "stb",
+    "version>=" : "2023-04-11#1"
+  }, {
+    "name" : "glm",
+    "version>=" : "0.9.9.8#2"
+  } ]
+}
