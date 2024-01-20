@@ -8,15 +8,22 @@
 #include <string>
 
 namespace kat {
+    constexpr vk::ComponentMapping STANDARD_COMPONENT_MAPPING{ vk::ComponentSwizzle::eR, vk::ComponentSwizzle::eG,
+                                                               vk::ComponentSwizzle::eB, vk::ComponentSwizzle::eA };
+
+    constexpr vk::ImageSubresourceRange color_subresource_range(uint32_t num_levels, uint32_t num_layers) {
+        return { vk::ImageAspectFlagBits::eColor, 0, num_levels, 0, num_layers };
+    }
+
     struct WindowConfig {
         std::string title = "Window";
         glm::ivec2  size  = { 1200, 900 };
     };
 
     struct SwapchainConfig {
-        vk::Format        format;
-        vk::ColorSpaceKHR color_space;
-        vk::Extent2D      extent;
+        vk::SurfaceFormatKHR surface_format;
+        vk::Extent2D         extent;
+        vk::PresentModeKHR   present_mode;
     };
 
     struct EngineConfig {
@@ -36,9 +43,12 @@ namespace kat {
         void select_queue_families();
         void create_device();
         void create_swapchain();
-        void create_swapchain_image_views();
 
     private:
+        vk::SurfaceFormatKHR select_surface_format() const;
+        vk::PresentModeKHR   select_present_mode() const;
+
+
         GLFWwindow *m_window;
 
         vk::Instance       m_instance;

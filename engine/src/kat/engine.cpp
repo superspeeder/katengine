@@ -1,6 +1,7 @@
 #include "kat/engine.hpp"
 
 
+#include <set>
 #include <unordered_set>
 
 namespace kat {
@@ -12,7 +13,6 @@ namespace kat {
         select_queue_families();
         create_device();
         create_swapchain();
-        create_swapchain_image_views();
     }
 
     Engine::~Engine() {
@@ -118,6 +118,7 @@ namespace kat {
                                                                    m_transfer_family.value(), m_compute_family.value() };
         float                                  queue_priority  = 1.0f;
 
+        queue_create_infos.reserve(unique_families.size());
         for (const auto &family : unique_families) {
             queue_create_infos.emplace_back(vk::DeviceQueueCreateFlags{}, family, 1, &queue_priority);
         }
@@ -129,9 +130,7 @@ namespace kat {
         features2.features.wideLines          = true;
         features2.features.fillModeNonSolid   = true;
 
-        auto create_info = vk::DeviceCreateInfo({}, queue_create_infos, {}, exts, {}, &features2);
-
-        m_device = m_physical_device.createDevice(create_info);
+        m_device = m_physical_device.createDevice({ {}, queue_create_infos, {}, exts, {}, &features2 });
 
         m_graphics_queue = m_device.getQueue(m_graphics_family.value(), 0);
         m_transfer_queue = m_device.getQueue(m_transfer_family.value(), 0);
@@ -142,18 +141,103 @@ namespace kat {
     void Engine::create_swapchain() {
         vk::SwapchainCreateInfoKHR create_info{};
 
-        auto caps = m_physical_device.getSurfaceCapabilitiesKHR(m_surface);
-        auto formats = m_physical_device.getSurfaceFormatsKHR(m_surface);
+        auto caps          = m_physical_device.getSurfaceCapabilitiesKHR(m_surface);
+        auto formats       = m_physical_device.getSurfaceFormatsKHR(m_surface);
         auto present_modes = m_physical_device.getSurfacePresentModesKHR(m_surface);
 
-        create_info.surface = m_surface;
+        create_info.surface       = m_surface;
         create_info.minImageCount = caps.minImageCount + 1;
         if (caps.maxImageCount > 0 && create_info.minImageCount > caps.maxImageCount) {
             create_info.minImageCount = caps.maxImageCount;
         }
 
-        create_info.imageFormat
+        m_swapchain_config.surface_format = select_surface_format();
+
+        create_info.imageFormat     = m_swapchain_config.surface_format.format;
+        create_info.imageColorSpace = m_swapchain_config.surface_format.colorSpace;
+
+        if (caps.currentExtent.height == UINT32_MAX) {
+            int w, h;
+            glfwGetFramebufferSize(m_window, &w, &h);
+            m_swapchain_config.extent = vk::Extent2D{
+                std::clamp(static_cast<uint32_t>(w), caps.minImageExtent.width, caps.maxImageExtent.width),
+                std::clamp(static_cast<uint32_t>(h), caps.minImageExtent.height, caps.maxImageExtent.height),
+            };
+        }
+        else {
+            m_swapchain_config.extent = caps.currentExtent;
+        }
+
+        create_info.imageExtent      = m_swapchain_config.extent;
+        create_info.imageArrayLayers = 1;
+        create_info.imageUsage       = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+
+        std::set<uint32_t>    families = { m_graphics_family.value(), m_present_family.value(),
+                                           m_transfer_family.value() };
+        std::vector<uint32_t> families_vec(families.cbegin(), families.cend());
+
+        if (families_vec.size() == 1) {
+            create_info.imageSharingMode = vk::SharingMode::eExclusive;
+        }
+        else {
+            create_info.imageSharingMode = vk::SharingMode::eConcurrent;
+            create_info.setQueueFamilyIndices(families_vec);
+        }
+
+        create_info.preTransform   = caps.currentTransform;
+        create_info.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+
+        m_swapchain_config.present_mode = select_present_mode();
+        create_info.presentMode         = m_swapchain_config.present_mode;
+
+        create_info.clipped      = true;
+        create_info.oldSwapchain = m_swapchain;
+
+        m_swapchain = m_device.createSwapchainKHR(create_info);
+
+        if (create_info.oldSwapchain) {
+            for (auto iv : m_swapchain_image_views)
+                m_device.destroy(iv);
+
+            m_device.destroy(create_info.oldSwapchain);
+            // TODO: signal
+        }
+
+        m_swapchain_images = m_device.getSwapchainImagesKHR(m_swapchain);
+        m_swapchain_image_views.clear();
+        m_swapchain_image_views.reserve(m_swapchain_images.size());
+
+        for (const auto &image : m_swapchain_images) {
+            m_swapchain_image_views.push_back(m_device.createImageView(
+                vk::ImageViewCreateInfo({}, image, vk::ImageViewType::e2D, m_swapchain_config.surface_format.format,
+                                        STANDARD_COMPONENT_MAPPING, color_subresource_range(1, 1))));
+        }
+
+        // TODO: another signal
     }
 
-    void Engine::create_swapchain_image_views() {}
+    vk::SurfaceFormatKHR Engine::select_surface_format() const {
+        const auto formats = m_physical_device.getSurfaceFormatsKHR(m_surface);
+
+        for (const auto &format : formats) {
+            if (format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear &&
+                (format.format == vk::Format::eR8G8B8A8Srgb || format.format == vk::Format::eB8G8R8A8Srgb)) {
+                return format;
+            }
+        }
+
+        return formats[0];
+    }
+
+    vk::PresentModeKHR Engine::select_present_mode() const {
+        const auto pms = m_physical_device.getSurfacePresentModesKHR(m_surface);
+
+        for (const auto &pm : pms) {
+            if (pm == vk::PresentModeKHR::eMailbox) {
+                return pm;
+            }
+        }
+
+        return vk::PresentModeKHR::eFifo;
+    }
 } // namespace kat
