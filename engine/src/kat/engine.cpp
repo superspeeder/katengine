@@ -13,16 +13,8 @@ namespace kat {
         select_queue_families();
         create_device();
         create_swapchain();
-    }
-
-    Engine::~Engine() {
-        for (auto iv : m_swapchain_image_views)
-            m_device.destroy(iv);
-
-        m_device.destroy(m_swapchain);
-        m_device.destroy();
-        m_instance.destroy(m_surface);
-        m_instance.destroy();
+        create_command_buffers();
+        create_syncs();
     }
 
     void Engine::create_window(const WindowConfig &config) {
@@ -130,6 +122,13 @@ namespace kat {
         features2.features.wideLines          = true;
         features2.features.fillModeNonSolid   = true;
 
+        vk::PhysicalDeviceVulkan13Features v13f{};
+        v13f.synchronization2 = true;
+        v13f.dynamicRendering = true;
+        v13f.inlineUniformBlock = true;
+
+        features2.pNext = &v13f;
+
         m_device = m_physical_device.createDevice({ {}, queue_create_infos, {}, exts, {}, &features2 });
 
         m_graphics_queue = m_device.getQueue(m_graphics_family.value(), 0);
@@ -141,9 +140,7 @@ namespace kat {
     void Engine::create_swapchain() {
         vk::SwapchainCreateInfoKHR create_info{};
 
-        auto caps          = m_physical_device.getSurfaceCapabilitiesKHR(m_surface);
-        auto formats       = m_physical_device.getSurfaceFormatsKHR(m_surface);
-        auto present_modes = m_physical_device.getSurfacePresentModesKHR(m_surface);
+        const auto caps = m_physical_device.getSurfaceCapabilitiesKHR(m_surface);
 
         create_info.surface       = m_surface;
         create_info.minImageCount = caps.minImageCount + 1;
@@ -230,14 +227,104 @@ namespace kat {
     }
 
     vk::PresentModeKHR Engine::select_present_mode() const {
-        const auto pms = m_physical_device.getSurfacePresentModesKHR(m_surface);
-
-        for (const auto &pm : pms) {
+        for (const auto pms = m_physical_device.getSurfacePresentModesKHR(m_surface); const auto &pm : pms) {
             if (pm == vk::PresentModeKHR::eMailbox) {
                 return pm;
             }
         }
 
         return vk::PresentModeKHR::eFifo;
+    }
+
+    void Engine::create_command_buffers() {
+        m_graphics_pool = m_device.createCommandPool(
+            vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, m_graphics_family.value()));
+
+        m_command_buffers = m_device.allocateCommandBuffers(
+            vk::CommandBufferAllocateInfo(m_graphics_pool, vk::CommandBufferLevel::ePrimary, MAX_FRAMES_IN_FLIGHT));
+    }
+
+    void Engine::create_syncs() {
+        m_image_available_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        m_render_finished_semaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        m_in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            m_image_available_semaphores[i] = create_semaphore();
+            m_render_finished_semaphores[i] = create_semaphore();
+            m_in_flight_fences[i]           = create_fence(true);
+        }
+    }
+
+    Engine::~Engine() {
+        m_device.waitIdle();
+
+        m_device.destroy(m_graphics_pool);
+
+        for (const auto &o : m_render_finished_semaphores)
+            m_device.destroy(o);
+
+        for (const auto &o : m_in_flight_fences)
+            m_device.destroy(o);
+
+        for (const auto &o : m_image_available_semaphores)
+            m_device.destroy(o);
+
+        for (const auto &iv : m_swapchain_image_views)
+            m_device.destroy(iv);
+
+        m_device.destroy(m_swapchain);
+        m_device.destroy();
+        m_instance.destroy(m_surface);
+        m_instance.destroy();
+    }
+
+    bool Engine::is_open() const {
+        return !glfwWindowShouldClose(m_window);
+    }
+
+    CommandRecorder Engine::begin_frame() {
+        [[maybe_unused]] auto ignored = m_device.waitForFences(get_current_in_flight_fence(), true, UINT64_MAX);
+        m_device.resetFences(get_current_in_flight_fence());
+
+        m_current_image_index =
+            m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX, get_current_image_available_semaphore(), {}).value;
+
+        get_current_command_buffer().reset();
+        get_current_command_buffer().begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+
+        return CommandRecorder(get_current_command_buffer());
+    }
+
+    void Engine::end_frame() {
+        get_current_command_buffer().end();
+
+        auto cmd = get_current_command_buffer();
+        auto ws  = get_current_image_available_semaphore();
+        auto ss  = get_current_render_finished_semaphore();
+
+        vk::PipelineStageFlags wdsm = vk::PipelineStageFlagBits::eTopOfPipe;
+
+        vk::SubmitInfo submit_info{};
+        submit_info.setCommandBuffers(cmd);
+        submit_info.setWaitSemaphores(ws).setWaitDstStageMask(wdsm);
+        submit_info.setSignalSemaphores(ss);
+
+        m_graphics_queue.submit(submit_info, get_current_in_flight_fence());
+
+        vk::PresentInfoKHR present_info{};
+        present_info.setWaitSemaphores(ss).setSwapchains(m_swapchain).setImageIndices(m_current_image_index);
+        [[maybe_unused]] auto ignored = m_present_queue.presentKHR(present_info);
+
+        m_current_frame = (m_current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    vk::Semaphore Engine::create_semaphore() const {
+        return m_device.createSemaphore(vk::SemaphoreCreateInfo());
+    }
+
+    vk::Fence Engine::create_fence(const bool signaled) const {
+        return m_device.createFence(
+            vk::FenceCreateInfo(signaled ? vk::FenceCreateFlagBits::eSignaled : vk::FenceCreateFlags()));
     }
 } // namespace kat
