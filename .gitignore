@@ -1,0 +1,7 @@
+cmake-build-*/
+build/
+out/
+run/
+logs/
+*.log
+
