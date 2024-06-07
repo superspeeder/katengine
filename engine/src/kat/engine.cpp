@@ -69,13 +69,13 @@ namespace kat {
         }
     }
 
-    std::shared_ptr<spdlog::logger> createEasyLogger(const std::string &name, GlobalState *globalState = nullptr) {
-        if (!globalState) globalState = ::kat::globalState;
+    std::shared_ptr<spdlog::logger> createEasyLogger(const std::string &name, GlobalState *gs = nullptr) {
+        if (!gs) gs = globalState;
 
         std::string base_file = "logs/" + name + ".log";
         auto seperateFileLogger = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(base_file, SIZE_MAX, 30, true);
 
-        std::array<std::shared_ptr<spdlog::sinks::sink>, 3> sinks = {seperateFileLogger, globalState->sharedFileSink, globalState->stdoutSink};
+        std::array<std::shared_ptr<spdlog::sinks::sink>, 3> sinks = {seperateFileLogger, gs->sharedFileSink, gs->stdoutSink};
         return std::make_shared<spdlog::logger>(name, sinks.begin(), sinks.end());
     }
 
@@ -96,9 +96,52 @@ namespace kat {
     }
 
     GlobalState::~GlobalState() {
+        device.waitIdle();
+
+        otclcStop = true;
+        otclCleaner.join();
+
+        destroy(transferPool);
+        destroy(mainPool);
+
         destroy(device);
         safeDestroy(debugMessenger);
         destroy(instance);
+    }
+
+    bool otclcCheckStop() {
+        return !globalState->otclcStop;
+    }
+
+    void otclc() {
+        vk::Fence wait;
+        bool managed;
+        vk::CommandBuffer cmdb;
+
+        while (otclcCheckStop())
+        {
+            std::this_thread::yield();
+            {
+                std::lock_guard guard(globalState->mutOTCL);
+                if (globalState->otcl.empty()) continue;
+                std::tie(wait, managed, cmdb) = globalState->otcl.front();
+                globalState->otcl.pop();
+            }
+
+            if (globalState->device.getFenceStatus(wait) == vk::Result::eNotReady) {
+                std::lock_guard guard(globalState->mutOTCL);
+                globalState->otcl.emplace(wait, managed, cmdb);
+            } else {
+                spdlog::debug("Freed command buffer: {:x}", reinterpret_cast<uint64_t>(static_cast<VkCommandBuffer>(cmdb)));
+                {
+                    std::lock_guard lk(globalState->mutMainPool);
+                    globalState->device.freeCommandBuffers(globalState->mainPool, cmdb);
+                }
+                if (managed) {
+                    destroy(wait);
+                }
+            }
+        }
     }
 
     void GlobalState::startup() {
@@ -203,7 +246,7 @@ namespace kat {
         bool queueFamiliesSame = mainFamily == transferFamily;
 
         std::vector<vk::DeviceQueueCreateInfo> dqcis;
-        std::array<float, 1> queuePriorities =  {1.0f};
+        std::array<float, 1> queuePriorities = {1.0f};
         dqcis.emplace_back(vk::DeviceQueueCreateFlags{}, mainFamily, queuePriorities);
 
         if (!queueFamiliesSame) {
@@ -244,7 +287,7 @@ namespace kat {
         v12f.pNext = &v13f;
         v13f.pNext = &eds3f;
 
-        std::vector<const char*> extensions = {
+        std::vector<const char *> extensions = {
                 VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                 VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME,
         };
@@ -256,14 +299,188 @@ namespace kat {
 
         mainQueue = device.getQueue(mainFamily, 0);
         transferQueue = device.getQueue(transferFamily, 0);
+
+        mainPool = device.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, mainFamily));
+        transferPool = device.createCommandPool(vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, transferFamily));
+
+        otclCleaner = std::jthread(otclc);
     }
 
+
     void run() {
+        while (globalState->activeWindowCount > 0) {
+            eventloopCycle();
+            renderloopCycle();
+        }
     }
 
     void eventloopCycle() {
+        glfwPollEvents();
+    }
+
+    struct PI_ {
+        vk::SwapchainKHR swapchain;
+        uint32_t imageIndex;
+        vk::Semaphore sem;
+    };
+
+    std::vector<PI_> pinfos;
+
+    void doWindowRender(const std::unique_ptr<Window> &second) {
+        if (second->acquireFrame()) {
+            const auto* sync = second->getCurrentFrameResources().sync;
+
+            if (globalState->doRenderSetup) {
+                vku::OTCSync otcs{};
+                otcs.wait = sync->imageAvailableSemaphore; // todo: make and pass a semaphore to the rendering code for signal when the next option isn't available (to replace imageAvailableSemaphore)
+                if (globalState->isRenderSetupOnlyOperation) {
+                    otcs.signal = sync->renderFinishedSemaphore;
+                }
+
+                vku::otc([&](const vk::CommandBuffer& cmd) {
+                    vk::ImageMemoryBarrier2 imb{};
+                    imb.image = second->getCurrentFrameResources().image;
+                    imb.srcAccessMask = vk::AccessFlagBits2::eNone;
+                    imb.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+                    imb.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+                    imb.dstStageMask = vk::PipelineStageFlagBits2::eClear;
+                    imb.srcQueueFamilyIndex = globalState->mainFamily;
+                    imb.dstQueueFamilyIndex = globalState->mainFamily;
+                    imb.oldLayout = vk::ImageLayout::eUndefined;
+                    imb.newLayout = vk::ImageLayout::eTransferDstOptimal;
+                    imb.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+
+                    float n = (sinf(float(glfwGetTime())) + 1.0f) / 2.0f;
+
+                    vk::ClearColorValue clearValue{n, 0.0f, 0.0f, 1.0f};
+                    vk::ImageSubresourceRange range{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+
+                    vk::ImageMemoryBarrier2 imb2{};
+                    imb2.image = second->getCurrentFrameResources().image;
+                    imb2.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+                    imb2.dstAccessMask = vk::AccessFlagBits2::eNone;
+                    imb2.srcStageMask = vk::PipelineStageFlagBits2::eClear;
+                    imb2.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+                    imb2.srcQueueFamilyIndex = globalState->mainFamily;
+                    imb2.dstQueueFamilyIndex = globalState->mainFamily;
+                    imb2.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+                    imb2.newLayout = vk::ImageLayout::ePresentSrcKHR;
+                    imb2.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+
+                    cmd.pipelineBarrier2(vk::DependencyInfo({}, {}, {}, imb));
+                    cmd.clearColorImage(second->getCurrentFrameResources().image, vk::ImageLayout::eTransferDstOptimal, clearValue, range);
+                    cmd.pipelineBarrier2(vk::DependencyInfo({}, {}, {}, imb2));
+                }, sync->inFlightFence, otcs);
+            }
+            // TODO: render frame. for now we just do some simple ops
+
+            pinfos.push_back(PI_{.swapchain = second->getSwapchain(), .imageIndex = second->getCurrentFrameResources().imageIndex, .sem = sync->renderFinishedSemaphore});
+        }
     }
 
     void renderloopCycle() {
+        pinfos.clear();
+
+        for (const auto &window: globalState->activeWindows) {
+            doWindowRender(window.second);
+        }
+
+        std::vector<vk::SwapchainKHR> storage0;
+        std::vector<uint32_t> storage1;
+        std::vector<vk::Semaphore> storage2;
+
+        for (const auto pi : pinfos) {
+            storage0.push_back(pi.swapchain);
+            storage1.push_back(pi.imageIndex);
+            storage2.push_back(pi.sem);
+        }
+
+        if (pinfos.empty()) return;
+
+        vk::PresentInfoKHR present{};
+        present.setSwapchains(storage0);
+        present.setImageIndices(storage1);
+        present.setWaitSemaphores(storage2);
+
+        [[maybe_unused]] auto _ = globalState->mainQueue.presentKHR(present);
     }
-}// namespace kat
+
+    namespace vku {
+        vk::Semaphore createSemaphore() {
+            static const vk::SemaphoreCreateInfo sci{};
+            return globalState->device.createSemaphore(sci);
+        }
+
+        vk::Fence createFence() {
+            static const vk::FenceCreateInfo fci{};
+            return globalState->device.createFence(fci);
+        }
+
+        vk::Fence createFenceSignaled() {
+            static const vk::FenceCreateInfo fci(vk::FenceCreateFlagBits::eSignaled);
+            return globalState->device.createFence(fci);
+        }
+
+        void waitFence(const vk::Fence &fence) {
+            auto _ = globalState->device.waitForFences(fence, true, UINT64_MAX);
+        }
+
+        void resetFence(vk::Fence fence) {
+            globalState->device.resetFences(fence);
+        }
+
+        void otc(const std::function<void(const vk::CommandBuffer &)> &f, OTCSync sync) {
+            vk::CommandBuffer cmdb;
+            {
+                std::lock_guard lk(globalState->mutMainPool);
+                cmdb= globalState->device.allocateCommandBuffers(vk::CommandBufferAllocateInfo(globalState->mainPool, vk::CommandBufferLevel::ePrimary, 1))[0];
+            }
+            cmdb.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+            f(cmdb);
+            cmdb.end();
+
+            vk::SubmitInfo si{};
+            si.setCommandBuffers(cmdb);
+            si.setWaitSemaphores(sync.wait);
+            vk::PipelineStageFlags stage = vk::PipelineStageFlagBits::eTopOfPipe;
+
+            si.setWaitDstStageMask(stage);
+            si.setSignalSemaphores(sync.signal);
+
+            vk::Fence fence = createFence();
+
+            globalState->mainQueue.submit(si, fence);
+
+            {
+                std::lock_guard lock(globalState->mutOTCL);
+                globalState->otcl.emplace(fence, true, cmdb);
+            }
+        }
+
+        void otc(const std::function<void(const vk::CommandBuffer &)> &f, vk::Fence fence, OTCSync sync) {
+            vk::CommandBuffer cmdb;
+            {
+                std::lock_guard lk(globalState->mutMainPool);
+                cmdb= globalState->device.allocateCommandBuffers(vk::CommandBufferAllocateInfo(globalState->mainPool, vk::CommandBufferLevel::ePrimary, 1))[0];
+            }
+            cmdb.begin(vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+            f(cmdb);
+            cmdb.end();
+
+            vk::SubmitInfo si{};
+            si.setCommandBuffers(cmdb);
+            si.setWaitSemaphores(sync.wait);
+            vk::PipelineStageFlags stage = vk::PipelineStageFlagBits::eTopOfPipe;
+
+            si.setWaitDstStageMask(stage);
+            si.setSignalSemaphores(sync.signal);
+
+            globalState->mainQueue.submit(si, fence);
+
+            {
+                std::lock_guard lock(globalState->mutOTCL);
+                globalState->otcl.emplace(fence, false, cmdb);
+            }
+        }
+    } // namespace vku
+} // namespace kat

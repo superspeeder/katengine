@@ -1,22 +1,26 @@
 #pragma once
 
-
+#include <memory>
+#include <set>
+#include <string>
+#include <unordered_set>
+#include <vector>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
 
 #include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+
 #include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <vulkan/vulkan.hpp>
 
 #include <GLFW/glfw3.h>
 
-#include <set>
-#include <unordered_set>
+#include "kat/window.hpp"
 
-#include <string>
-#include <vector>
-
-#include <memory>
 
 #ifdef KATENGINE_DEBUG
 #define KAT_DEBUG_SWITCH(dv, rv) dv
@@ -37,6 +41,8 @@
 #endif
 
 namespace kat {
+    class Window;
+
     struct Version {
         int major, minor, patch, revision = 0;
     };
@@ -57,7 +63,9 @@ namespace kat {
         std::shared_ptr<spdlog::logger> mainLogger;
         std::shared_ptr<spdlog::logger> validationLogger;
 
-        std::unordered_set<GLFWwindow *> activeWindows;
+        std::atomic<uint32_t> activeWindowCount = 0;
+        std::unordered_map<size_t, std::unique_ptr<Window>> activeWindows;
+        std::atomic<size_t> nextWindowId;
 
         vk::Instance instance;
         vk::DebugUtilsMessengerEXT debugMessenger;
@@ -69,6 +77,22 @@ namespace kat {
 
         vk::Queue mainQueue;
         vk::Queue transferQueue;
+
+        vk::CommandPool mainPool;
+        vk::CommandPool transferPool;
+
+        std::mutex mutMainPool;
+        std::mutex mutTransferPool;
+
+        std::mutex mutOTCL;
+        std::queue<std::tuple<vk::Fence, bool, vk::CommandBuffer>> otcl; // first fence is waited on, if second is false then the fence isn't destroyed (assume that the fence is used elsewhere);
+
+        std::jthread otclCleaner;
+
+        bool doRenderSetup = false;
+        bool isRenderSetupOnlyOperation = false; // will make render setup also signal render completion. largely for use while I'm developing stuff and don't have any rendering code yet (so the app actually updates).
+
+        std::atomic_bool otclcStop = false;
 
         friend void init();
         friend void startup();
@@ -156,5 +180,19 @@ namespace kat {
     void eventloopCycle();
     void renderloopCycle();
 
+    namespace vku {
+        vk::Semaphore createSemaphore();
+        vk::Fence createFence();
+        vk::Fence createFenceSignaled();
 
-}// namespace kat
+        void waitFence(const vk::Fence& fence);
+        void resetFence(vk::Fence fence);
+
+        struct OTCSync {
+            vk::Semaphore signal, wait;
+        };
+
+        void otc(const std::function<void(const vk::CommandBuffer&)>& f, OTCSync sync = {});
+        void otc(const std::function<void(const vk::CommandBuffer&)>& f, vk::Fence fence, OTCSync sync = {});
+    }
+} // namespace kat
