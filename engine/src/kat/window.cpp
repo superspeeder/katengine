@@ -3,13 +3,13 @@
 
 namespace kat {
     FrameSyncResources::FrameSyncResources() {
-        imageAvailableSemaphore = kat::vku::createSemaphore();
-        renderFinishedSemaphore = kat::vku::createSemaphore();
-        inFlightFence = kat::vku::createFenceSignaled();
+        imageAvailableSemaphore = vku::createSemaphore();
+        renderFinishedSemaphore = vku::createSemaphore();
+        inFlightFence = vku::createFenceSignaled();
     }
 
     FrameSyncResources::~FrameSyncResources() {
-        kat::vku::waitFence(inFlightFence);
+        vku::waitFence(inFlightFence);
         kat::destroy(inFlightFence);
         kat::destroy(imageAvailableSemaphore);
         kat::destroy(renderFinishedSemaphore);
@@ -82,6 +82,8 @@ namespace kat {
         m_PresentMode = selectPresentMode(presentModes, m_EnableVsync);
 
         recreateSwapchain();
+
+        m_WindowHandler = std::make_shared<kat::BaseWindowHandler>(); // default window handler impl
     }
 
     Window::~Window() {
@@ -159,7 +161,7 @@ namespace kat {
         if (oldSwapchain) {
             // wait for all in flight frames to complete rendering so we don't pull resources out from under them.
             for (const auto &s: m_SyncResources) {
-                kat::vku::waitFence(s.inFlightFence);
+                vku::waitFence(s.inFlightFence);
             }
 
             for (const auto &iv: m_ImageViews) {
@@ -187,7 +189,7 @@ namespace kat {
 
         m_CurrentFrameResources.sync = &m_SyncResources[m_CurrentFrame];
 
-        kat::vku::waitFence(syncResources.inFlightFence);
+        vku::waitFence(syncResources.inFlightFence);
 
         auto r = globalState->device.acquireNextImageKHR(m_Swapchain, UINT64_MAX, syncResources.imageAvailableSemaphore);
         if (r.result == vk::Result::eErrorOutOfDateKHR) {
@@ -195,7 +197,7 @@ namespace kat {
             return false; // frame is skipped.
         }
 
-        kat::vku::resetFence(syncResources.inFlightFence);
+        vku::resetFence(syncResources.inFlightFence);
 
         m_CurrentFrameResources.imageIndex = r.value;
         m_CurrentFrameResources.image = m_Images[r.value];
@@ -204,16 +206,89 @@ namespace kat {
         return true;
     }
 
-    const WindowFrameResources &Window::getCurrentFrameResources() const {
-        return m_CurrentFrameResources;
-    }
-
     void Window::nextFrame() {
         m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    vk::Image Window::getImage(uint32_t index) const {
+        return getCurrentFrameResources().image;
+    }
+
+    uint32_t Window::getImageCount() const noexcept {
+        return m_Images.size();
+    }
+
+    const std::vector<vk::Image> &Window::getImages() const {
+        return m_Images;
+    }
+
+    vk::SurfaceFormatKHR Window::getSurfaceFormat() const noexcept {
+        return m_SwapchainFormat;
+    }
+
+    vk::PresentModeKHR Window::getPresentMode() const noexcept {
+        return m_PresentMode;
+    }
+
+    vk::Extent2D Window::getCurrentExtent() const noexcept {
+        return m_CurrentExtent;
     }
 
     const vk::SwapchainKHR &Window::getSwapchain() const noexcept {
         return m_Swapchain;
     }
 
+    const WindowFrameResources &Window::getCurrentFrameResources() const {
+        return m_CurrentFrameResources;
+    }
+
+    const std::shared_ptr<BaseWindowHandler> &Window::getWindowHandler() const {
+        return m_WindowHandler;
+    }
+
+    void BaseWindowHandler::onRender(const std::shared_ptr<Window> &window, const WindowFrameResources &resources) {
+        vku::OTCSync otcs{};
+        otcs.wait = resources.sync->imageAvailableSemaphore;
+        otcs.signal = resources.sync->renderFinishedSemaphore;
+
+        vku::otc([&](const vk::CommandBuffer& cmd) {
+            vk::ImageMemoryBarrier2 imb{};
+            imb.image = resources.image;
+            imb.srcAccessMask = vk::AccessFlagBits2::eNone;
+            imb.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+            imb.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+            imb.dstStageMask = vk::PipelineStageFlagBits2::eClear;
+            imb.srcQueueFamilyIndex = globalState->mainFamily;
+            imb.dstQueueFamilyIndex = globalState->mainFamily;
+            imb.oldLayout = vk::ImageLayout::eUndefined;
+            imb.newLayout = vk::ImageLayout::eTransferDstOptimal;
+            imb.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+
+            float n = (sinf(float(glfwGetTime())) + 1.0f) / 2.0f;
+
+            vk::ClearColorValue clearValue{n, 0.0f, 0.0f, 1.0f};
+            vk::ImageSubresourceRange range{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+
+
+            cmd.pipelineBarrier2(vk::DependencyInfo({}, {}, {}, imb));
+            cmd.clearColorImage(resources.image, vk::ImageLayout::eTransferDstOptimal, clearValue, range);
+
+            vk::ImageMemoryBarrier2 imb2{};
+            imb2.image = resources.image;
+            imb2.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+            imb2.dstAccessMask = vk::AccessFlagBits2::eNone;
+            imb2.srcStageMask = vk::PipelineStageFlagBits2::eClear;
+            imb2.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+            imb2.srcQueueFamilyIndex = globalState->mainFamily;
+            imb2.dstQueueFamilyIndex = globalState->mainFamily;
+            imb2.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+            imb2.newLayout = vk::ImageLayout::ePresentSrcKHR;
+            imb2.subresourceRange = vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+
+            cmd.pipelineBarrier2(vk::DependencyInfo({}, {}, {}, imb2));
+        }, resources.sync->inFlightFence, otcs, window);
+    }
+
+    BaseWindowHandler::BaseWindowHandler() {
+    }
 } // namespace kat

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <memory>
+#include <concepts>
+
 #include <vulkan/vulkan.hpp>
 
 #include <GLFW/glfw3.h>
@@ -46,6 +49,8 @@ namespace kat {
         const FrameSyncResources* sync;
     };
 
+    class BaseWindowHandler;
+
     class Window {
         Window(const std::string &title, const vk::Extent2D &size, const WindowOptions &options, size_t id);
 
@@ -62,21 +67,6 @@ namespace kat {
 
         void recreateSwapchain();
 
-        [[nodiscard]] vk::Image getImage(uint32_t index) const;
-
-        [[nodiscard]] uint32_t getImageCount() const noexcept;
-
-        [[nodiscard]] const std::vector<vk::Image> &getImages() const;
-
-        [[nodiscard]] vk::SurfaceFormatKHR getSurfaceFormat() const noexcept;
-
-        [[nodiscard]] vk::PresentModeKHR getPresentMode() const noexcept;
-
-        [[nodiscard]] vk::Extent2D getCurrentExtent() const noexcept;
-
-        [[nodiscard]] const WindowFrameResources& getCurrentFrameResources() const;
-
-
         /**
          * Acquire the next image from the swapchain.
          *
@@ -89,7 +79,30 @@ namespace kat {
 
         void nextFrame();
 
+        [[nodiscard]] vk::Image getImage(uint32_t index) const;
+
+        [[nodiscard]] uint32_t getImageCount() const noexcept;
+
+        [[nodiscard]] const std::vector<vk::Image> &getImages() const;
+
+        [[nodiscard]] vk::SurfaceFormatKHR getSurfaceFormat() const noexcept;
+
+        [[nodiscard]] vk::PresentModeKHR getPresentMode() const noexcept;
+
+        [[nodiscard]] vk::Extent2D getCurrentExtent() const noexcept;
+
         [[nodiscard]] const vk::SwapchainKHR &getSwapchain() const noexcept;
+
+        [[nodiscard]] const WindowFrameResources& getCurrentFrameResources() const;
+
+        template<std::derived_from<BaseWindowHandler> T>
+        void setWindowHandler(const std::shared_ptr<T> &handler) {
+            m_WindowHandler = std::static_pointer_cast<BaseWindowHandler>(handler);
+        };
+
+        [[nodiscard]] const std::shared_ptr<BaseWindowHandler>& getWindowHandler() const;
+
+
 
       private:
         size_t m_Id;
@@ -111,5 +124,16 @@ namespace kat {
         WindowFrameResources m_CurrentFrameResources;
 
         uint32_t m_CurrentFrame = 0;
+
+        std::shared_ptr<BaseWindowHandler> m_WindowHandler;
     };
+
+    class BaseWindowHandler {
+      public:
+        BaseWindowHandler();
+
+        // TODO: fancier rendering, or maybe include some utilities and other things to pull off more advanced offscreen rendering stuff.
+        virtual void onRender(const std::shared_ptr<Window>& window, const WindowFrameResources& resources);
+    };
+
 } // namespace kat

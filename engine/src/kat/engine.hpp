@@ -1,14 +1,14 @@
 #pragma once
 
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
-#include <queue>
-#include <mutex>
-#include <thread>
-#include <condition_variable>
 
 #include <spdlog/spdlog.h>
 
@@ -18,6 +18,8 @@
 #include <vulkan/vulkan.hpp>
 
 #include <GLFW/glfw3.h>
+
+#include <eventpp/callbacklist.h>
 
 #include "kat/window.hpp"
 
@@ -64,7 +66,7 @@ namespace kat {
         std::shared_ptr<spdlog::logger> validationLogger;
 
         std::atomic<uint32_t> activeWindowCount = 0;
-        std::unordered_map<size_t, std::unique_ptr<Window>> activeWindows;
+        std::unordered_map<size_t, std::shared_ptr<Window>> activeWindows;
         std::atomic<size_t> nextWindowId;
 
         vk::Instance instance;
@@ -81,13 +83,15 @@ namespace kat {
         vk::CommandPool mainPool;
         vk::CommandPool transferPool;
 
-        std::mutex mutMainPool;
-        std::mutex mutTransferPool;
+        vk::CommandPool otcPool;
 
+        std::mutex mutOTCPool;
         std::mutex mutOTCL;
-        std::queue<std::tuple<vk::Fence, bool, vk::CommandBuffer>> otcl; // first fence is waited on, if second is false then the fence isn't destroyed (assume that the fence is used elsewhere);
 
-        std::jthread otclCleaner;
+        // the shared ptr can be used for lifetime preservation.
+        std::queue<std::tuple<vk::Fence, bool, vk::CommandBuffer, std::shared_ptr<void>>> otcl; // first fence is waited on, if second is false then the fence isn't destroyed (assume that the fence is used elsewhere);
+
+//        std::jthread otclCleaner;
 
         bool doRenderSetup = false;
         bool isRenderSetupOnlyOperation = false; // will make render setup also signal render completion. largely for use while I'm developing stuff and don't have any rendering code yet (so the app actually updates).
@@ -97,6 +101,8 @@ namespace kat {
         friend void init();
         friend void startup();
         friend void terminate();
+
+        void wrapup();
 
       private:
         GlobalState();
@@ -185,14 +191,16 @@ namespace kat {
         vk::Fence createFence();
         vk::Fence createFenceSignaled();
 
-        void waitFence(const vk::Fence& fence);
+        void waitFence(const vk::Fence &fence);
         void resetFence(vk::Fence fence);
 
         struct OTCSync {
             vk::Semaphore signal, wait;
+            vk::PipelineStageFlags2 waitStage = vk::PipelineStageFlagBits2::eTopOfPipe;
+            vk::PipelineStageFlags2 signalStage = vk::PipelineStageFlagBits2::eBottomOfPipe;
         };
 
-        void otc(const std::function<void(const vk::CommandBuffer&)>& f, OTCSync sync = {});
-        void otc(const std::function<void(const vk::CommandBuffer&)>& f, vk::Fence fence, OTCSync sync = {});
-    }
+        void otc(const std::function<void(const vk::CommandBuffer &)> &f, OTCSync sync = {}, const std::shared_ptr<void> &ptr = {});
+        void otc(const std::function<void(const vk::CommandBuffer &)> &f, vk::Fence fence, OTCSync sync = {}, const std::shared_ptr<void> &ptr = {});
+    } // namespace vku
 } // namespace kat
