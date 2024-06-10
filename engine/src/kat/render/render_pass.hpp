@@ -99,7 +99,23 @@ namespace kat {
         std::optional<MemoryBarrier> memoryBarrier;
     };
 
+    struct RenderPassInfo {
+        std::vector<AttachmentInfo> attachments;
+        std::vector<SubpassInfo> subpasses;
+        std::vector<SubpassDependency> subpassDependencies;
+    };
+
     class RenderPass {
+      public:
+
+        explicit RenderPass(const RenderPassInfo& info);
+        ~RenderPass();
+
+
+
+
+      private:
+        vk::RenderPass m_RenderPass;
     };
 
 } // namespace kat

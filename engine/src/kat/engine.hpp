@@ -91,7 +91,7 @@ namespace kat {
         // the shared ptr can be used for lifetime preservation.
         std::queue<std::tuple<vk::Fence, bool, vk::CommandBuffer, std::shared_ptr<void>>> otcl; // first fence is waited on, if second is false then the fence isn't destroyed (assume that the fence is used elsewhere);
 
-//        std::jthread otclCleaner;
+        //        std::jthread otclCleaner;
 
         bool doRenderSetup = false;
         bool isRenderSetupOnlyOperation = false; // will make render setup also signal render completion. largely for use while I'm developing stuff and don't have any rendering code yet (so the app actually updates).
@@ -185,6 +185,143 @@ namespace kat {
 
     void eventloopCycle();
     void renderloopCycle();
+
+    template<typename T>
+    T *smalloc() {
+        return static_cast<T *>(malloc(sizeof(T)));
+    };
+
+    template<typename T, size_t N>
+    T *smalloc() {
+        return static_cast<T *>(malloc(sizeof(T) * N));
+    };
+
+    template<typename T>
+    T *smalloc(const size_t &n) {
+        return static_cast<T *>(malloc(sizeof(T) * n));
+    };
+
+    template<typename T>
+    T *smalloc(T &&value) {
+        T *ptr = smalloc<T>();
+        std::memcpy(ptr, &value, sizeof(T));
+        return ptr;
+    };
+
+    class stack {
+        std::vector<void *> blocks;
+
+      public:
+        inline stack() : blocks(){};
+
+        inline ~stack() {
+            this->free();
+        };
+
+        inline void free() {
+            for (void *b: blocks) {
+                std::free(b);
+            }
+
+            blocks.clear();
+        }
+
+        template<typename T>
+        T *smalloc() {
+            return static_cast<T *>(this->malloc(sizeof(T)));
+        };
+
+        template<typename T, size_t N>
+        T *smalloc() {
+            return static_cast<T *>(this->malloc(sizeof(T) * N));
+        };
+
+        template<typename T>
+        T *smalloc(const size_t &n) {
+            return static_cast<T *>(this->malloc(sizeof(T) * n));
+        };
+
+        template<typename T>
+        T *smalloc(T &&value) {
+            T *ptr = smalloc<T>();
+            std::memcpy(ptr, &value, sizeof(T));
+            return ptr;
+        };
+
+        void *malloc(size_t size) {
+            void *p = std::malloc(size);
+            blocks.push_back(p);
+            return p;
+        };
+
+        stack(stack &&) = delete;
+        stack(const stack &) = delete;
+        stack &operator=(stack &&) = delete;
+        stack &operator=(const stack &) = delete;
+    };
+
+    template<typename T>
+    concept sccompatible = ((std::same_as<std::remove_cvref_t<decltype(T::sType)>, vk::StructureType> ||
+                             std::same_as<std::remove_cvref_t<decltype(T::sType)>, VkStructureType>) &&
+                            (std::same_as<std::remove_cvref_t<decltype(T::pNext)>, void *> ||
+                             std::same_as<std::remove_cvref_t<decltype(T::pNext)>, const void *>) &&
+                            offsetof(T, pNext) - offsetof(T, sType) == offsetof(vk::BaseOutStructure, pNext)) ||
+                           std::same_as<T, vk::BaseOutStructure> || std::same_as<T, vk::BaseInStructure>; // i.e. are they in the right place
+
+    inline void *offsetptr(void *a, size_t o) {
+        return static_cast<char *>(a) + o;
+    };
+
+    template<sccompatible T>
+    inline vk::BaseOutStructure *baseOutStructure(T *v) {
+        return static_cast<vk::BaseOutStructure *>(offsetptr(v, offsetof(T, sType)));
+    };
+
+    template<sccompatible T>
+    inline vk::BaseOutStructure *endofchain(T *top) {
+        if (top == nullptr) {
+            return nullptr;
+        }
+        vk::BaseOutStructure *b = baseOutStructure(top);
+        while (b->pNext) {
+            b = static_cast<vk::BaseOutStructure *>(b->pNext);
+        }
+
+        return b;
+    };
+
+    class DynamicStructureChain {
+        vk::BaseOutStructure *tail = nullptr;
+        vk::BaseOutStructure *head = nullptr;
+
+      public:
+        inline DynamicStructureChain() = default;
+
+        template<sccompatible T>
+        inline void push(T *structure) {
+            if (structure == nullptr) {
+                return;
+            }
+
+            auto *bos = baseOutStructure(structure);
+
+            if (head == nullptr) {
+                head = bos;
+            } else {
+                tail->pNext = bos;
+            }
+
+            auto *end = endofchain(bos);
+            tail = end;
+        };
+
+        inline vk::BaseOutStructure *get() const {
+            return head;
+        };
+
+        DynamicStructureChain(const DynamicStructureChain &) = delete;
+        DynamicStructureChain &operator=(const DynamicStructureChain &) = delete;
+    };
 
     namespace vku {
         vk::Semaphore createSemaphore();

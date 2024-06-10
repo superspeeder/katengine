@@ -170,9 +170,9 @@ namespace kat {
         spdlog::info("Starting up engine");
 
         vk::ApplicationInfo appInfo{};
-        appInfo.setApiVersion(VK_API_VERSION_1_3)
-                .setApplicationVersion(VK_MAKE_API_VERSION(appVersion.revision, appVersion.major, appVersion.minor, appVersion.patch))
-                .setEngineVersion(VK_MAKE_API_VERSION(0, KATENGINE_VERSION_MAJOR, KATENGINE_VERSION_MINOR, KATENGINE_VERSION_PATCH))
+        appInfo.setApiVersion(vk::ApiVersion13)
+                .setApplicationVersion(vk::makeApiVersion(appVersion.revision, appVersion.major, appVersion.minor, appVersion.patch))
+                .setEngineVersion(vk::makeApiVersion(0, KATENGINE_VERSION_MAJOR, KATENGINE_VERSION_MINOR, KATENGINE_VERSION_PATCH))
                 .setPApplicationName(appName.c_str())
                 .setPEngineName("KatEngine");
 
