@@ -246,6 +246,10 @@ namespace kat {
         return m_WindowHandler;
     }
 
+    const std::vector<vk::ImageView> &Window::getImageViews() const {
+        return m_ImageViews;
+    }
+
     void BaseWindowHandler::onRender(const std::shared_ptr<Window> &window, const WindowFrameResources &resources) {
         vku::OTCSync otcs{};
         otcs.wait = resources.sync->imageAvailableSemaphore;

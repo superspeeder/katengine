@@ -138,8 +138,32 @@ namespace kat {
 
             subpasses.emplace_back(vk::SubpassDescriptionFlags(/* TODO */), sInfo.bindPoint, sInfo.viewMask, sInfo.inputAttachments.size(), inputAttachments, sInfo.colorAttachments.size(), colorAttachments, resolveAttachments, dsa, sInfo.preservedAttachments.size(), sInfo.preservedAttachments.data(), dchain.get());
         }
+
+        std::vector<vk::SubpassDependency2> subpassDependencies;
+        for (const auto &sd: info.subpassDependencies) {
+            void *mb = nullptr;
+            if (sd.memoryBarrier.has_value()) {
+                const auto &memoryBarrier = *sd.memoryBarrier;
+                mb = st.smalloc(vk::MemoryBarrier2(memoryBarrier.sourceStage, memoryBarrier.sourceAccess, memoryBarrier.destinationStage, memoryBarrier.destinationAccess));
+            }
+
+            subpassDependencies.emplace_back(sd.source.subpass, sd.destination.subpass, sd.source.stage, sd.destination.stage, sd.source.access, sd.destination.access, sd.dependencyFlags, sd.viewOffset, mb);
+        }
+
+        DynamicStructureChain rpdsc;
+
+        if (info.fragmentDensityMap.has_value()) {
+            rpdsc.push(st.smalloc(vk::RenderPassFragmentDensityMapCreateInfoEXT(vk::AttachmentReference(info.fragmentDensityMap->attachment, info.fragmentDensityMap->layout))));
+        }
+
+        if (info.creationControlInfo.has_value()) {
+            rpdsc.push(st.smalloc(vk::RenderPassCreationControlEXT(info.creationControlInfo->disallowMerging)));
+        }
+
+        m_RenderPass = globalState->device.createRenderPass2(vk::RenderPassCreateInfo2({/* TODO: flags */}, attachments, subpasses, subpassDependencies, info.correlatedViewMasks, rpdsc.get()));
     }
 
     RenderPass::~RenderPass() {
+        destroy(m_RenderPass);
     }
 } // namespace kat

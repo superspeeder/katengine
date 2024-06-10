@@ -78,8 +78,8 @@ namespace kat {
 
     struct SubpassReference {
         uint32_t subpass;
-        vk::PipelineStageFlags sourceStage;
-        vk::AccessFlags accessFlags;
+        vk::PipelineStageFlags stage;
+        vk::AccessFlags access;
     };
 
     struct MemoryBarrier {
@@ -103,6 +103,10 @@ namespace kat {
         std::vector<AttachmentInfo> attachments;
         std::vector<SubpassInfo> subpasses;
         std::vector<SubpassDependency> subpassDependencies;
+        std::vector<uint32_t> correlatedViewMasks;
+
+        std::optional<AttachmentReference> fragmentDensityMap;
+        std::optional<RenderPassCreationControlInfo> creationControlInfo;
     };
 
     class RenderPass {
@@ -111,8 +115,7 @@ namespace kat {
         explicit RenderPass(const RenderPassInfo& info);
         ~RenderPass();
 
-
-
+        [[nodiscard]] inline vk::RenderPass get() const noexcept { return m_RenderPass; };
 
       private:
         vk::RenderPass m_RenderPass;

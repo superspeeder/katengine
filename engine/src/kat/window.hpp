@@ -85,6 +85,8 @@ namespace kat {
 
         [[nodiscard]] const std::vector<vk::Image> &getImages() const;
 
+        [[nodiscard]] const std::vector<vk::ImageView> &getImageViews() const;
+
         [[nodiscard]] vk::SurfaceFormatKHR getSurfaceFormat() const noexcept;
 
         [[nodiscard]] vk::PresentModeKHR getPresentMode() const noexcept;

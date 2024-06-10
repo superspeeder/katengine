@@ -315,7 +315,7 @@ namespace kat {
             tail = end;
         };
 
-        inline vk::BaseOutStructure *get() const {
+        [[nodiscard]] inline vk::BaseOutStructure *get() const {
             return head;
         };
 
