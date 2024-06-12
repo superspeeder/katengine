@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
 
-add_executable(game src/game/main.cpp src/game/main.hpp)
+add_executable(game src/game/main.cpp) 
 target_include_directories(game PUBLIC src/)
 target_link_libraries(game PRIVATE kat::engine)
 
