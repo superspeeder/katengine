@@ -20,6 +20,8 @@ int main(int argc, char *argv[]) {
 
     window->setWindowHandler(std::make_shared<WindowHandler>(window));
 
+    kat::globalState->seperateRenderAndUpdateThreads = true;
+
     kat::run();
 
     kat::terminate();

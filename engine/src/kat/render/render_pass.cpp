@@ -166,4 +166,12 @@ namespace kat {
     RenderPass::~RenderPass() {
         destroy(m_RenderPass);
     }
+
+    vk::Framebuffer RenderPass::createCompatibleFramebuffer(const std::vector<vk::ImageView> &attachments, vk::Extent3D extent) const {
+        return globalState->device.createFramebuffer(vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(), m_RenderPass, attachments, extent.width, extent.height, extent.depth));
+    }
+
+    vk::Framebuffer RenderPass::createCompatibleFramebuffer(vk::ImageView &attachment, vk::Extent3D extent) const {
+        return globalState->device.createFramebuffer(vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(), m_RenderPass, attachment, extent.width, extent.height, extent.depth));
+    }
 } // namespace kat

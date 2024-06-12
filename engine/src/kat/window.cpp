@@ -18,15 +18,17 @@ namespace kat {
     vk::PresentModeKHR selectPresentMode(const std::vector<vk::PresentModeKHR> &presentModes, bool vsync) {
         bool foundImmediate = false;
         bool foundFifoRelaxed = false;
+        bool foundMailbox = false;
 
         for (const auto &pm: presentModes) {
-            if (pm == vk::PresentModeKHR::eMailbox) return pm;
+            if (pm == vk::PresentModeKHR::eMailbox) foundMailbox = true;
             if (pm == vk::PresentModeKHR::eFifoRelaxed) foundFifoRelaxed = true;
             if (pm == vk::PresentModeKHR::eImmediate) foundImmediate = true;
         }
 
         if (!vsync) {
             if (foundImmediate) return vk::PresentModeKHR::eImmediate;
+            if (foundMailbox) return vk::PresentModeKHR::eMailbox;
             if (foundFifoRelaxed) return vk::PresentModeKHR::eFifoRelaxed;
         }
 
@@ -80,6 +82,8 @@ namespace kat {
 
         m_SwapchainFormat = selectSurfaceFormat(formats);
         m_PresentMode = selectPresentMode(presentModes, m_EnableVsync);
+
+        spdlog::info("Present Mode: {}", vk::to_string(m_PresentMode));
 
         recreateSwapchain();
 

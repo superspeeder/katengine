@@ -117,6 +117,9 @@ namespace kat {
 
         [[nodiscard]] inline vk::RenderPass get() const noexcept { return m_RenderPass; };
 
+        vk::Framebuffer createCompatibleFramebuffer(const std::vector<vk::ImageView> &attachments, vk::Extent3D extent) const;
+        vk::Framebuffer createCompatibleFramebuffer(vk::ImageView &attachment, vk::Extent3D extent) const;
+
       private:
         vk::RenderPass m_RenderPass;
     };

@@ -334,9 +334,24 @@ namespace kat {
     }
 
     void run() {
-        while (globalState->activeWindowCount > 0) {
-            eventloopCycle();
-            renderloopCycle();
+        if (globalState->seperateRenderAndUpdateThreads) {
+            std::jthread renderThread = std::jthread(+[](){
+                while (globalState->activeWindowCount > 0) {
+                    renderloopCycle();
+                }
+            });
+
+            while (globalState->activeWindowCount > 0) {
+                eventloopCycle();
+            }
+
+            if (renderThread.joinable())
+                renderThread.join();
+        } else {
+            while (globalState->activeWindowCount > 0) {
+                eventloopCycle();
+                renderloopCycle();
+            }
         }
 
         globalState->wrapup();
@@ -407,6 +422,16 @@ namespace kat {
         vk::Fence createFenceSignaled() {
             static const vk::FenceCreateInfo fci(vk::FenceCreateFlagBits::eSignaled);
             return globalState->device.createFence(fci);
+        }
+
+        vk::Event createEvent() {
+            static const vk::EventCreateInfo eci(vk::EventCreateFlags{});
+            return globalState->device.createEvent(eci);
+        }
+
+        vk::Event createDeviceOnlyEvent() {
+            static const vk::EventCreateInfo eci(vk::EventCreateFlagBits::eDeviceOnly);
+            return globalState->device.createEvent(eci);
         }
 
         void waitFence(const vk::Fence &fence) {
@@ -493,6 +518,18 @@ namespace kat {
                 std::lock_guard lock(globalState->mutOTCL);
                 globalState->otcl.emplace(fence, false, cmdb, ptr);
             }
+        }
+
+        bool getEventStatus(const vk::Event &event) {
+            return globalState->device.getEventStatus(event) == vk::Result::eEventSet;
+        }
+
+        void setEvent(const vk::Event &event) {
+            globalState->device.setEvent(event);
+        }
+
+        void resetEvent(const vk::Event &event) {
+            globalState->device.resetEvent(event);
         }
     } // namespace vku
 } // namespace kat

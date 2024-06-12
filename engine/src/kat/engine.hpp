@@ -23,6 +23,8 @@
 
 #include "kat/window.hpp"
 
+#include "kat/vku.hpp"
+
 
 #ifdef KATENGINE_DEBUG
 #define KAT_DEBUG_SWITCH(dv, rv) dv
@@ -68,6 +70,8 @@ namespace kat {
         std::atomic<uint32_t> activeWindowCount = 0;
         std::unordered_map<size_t, std::shared_ptr<Window>> activeWindows;
         std::atomic<size_t> nextWindowId;
+
+        bool seperateRenderAndUpdateThreads = false;
 
         vk::Instance instance;
         vk::DebugUtilsMessengerEXT debugMessenger;
@@ -186,79 +190,6 @@ namespace kat {
     void eventloopCycle();
     void renderloopCycle();
 
-    template<typename T>
-    T *smalloc() {
-        return static_cast<T *>(malloc(sizeof(T)));
-    };
-
-    template<typename T, size_t N>
-    T *smalloc() {
-        return static_cast<T *>(malloc(sizeof(T) * N));
-    };
-
-    template<typename T>
-    T *smalloc(const size_t &n) {
-        return static_cast<T *>(malloc(sizeof(T) * n));
-    };
-
-    template<typename T>
-    T *smalloc(T &&value) {
-        T *ptr = smalloc<T>();
-        std::memcpy(ptr, &value, sizeof(T));
-        return ptr;
-    };
-
-    class stack {
-        std::vector<void *> blocks;
-
-      public:
-        inline stack() : blocks(){};
-
-        inline ~stack() {
-            this->free();
-        };
-
-        inline void free() {
-            for (void *b: blocks) {
-                std::free(b);
-            }
-
-            blocks.clear();
-        }
-
-        template<typename T>
-        T *smalloc() {
-            return static_cast<T *>(this->malloc(sizeof(T)));
-        };
-
-        template<typename T, size_t N>
-        T *smalloc() {
-            return static_cast<T *>(this->malloc(sizeof(T) * N));
-        };
-
-        template<typename T>
-        T *smalloc(const size_t &n) {
-            return static_cast<T *>(this->malloc(sizeof(T) * n));
-        };
-
-        template<typename T>
-        T *smalloc(T &&value) {
-            T *ptr = smalloc<T>();
-            std::memcpy(ptr, &value, sizeof(T));
-            return ptr;
-        };
-
-        void *malloc(size_t size) {
-            void *p = std::malloc(size);
-            blocks.push_back(p);
-            return p;
-        };
-
-        stack(stack &&) = delete;
-        stack(const stack &) = delete;
-        stack &operator=(stack &&) = delete;
-        stack &operator=(const stack &) = delete;
-    };
 
     template<typename T>
     concept sccompatible = ((std::same_as<std::remove_cvref_t<decltype(T::sType)>, vk::StructureType> ||
@@ -327,9 +258,15 @@ namespace kat {
         vk::Semaphore createSemaphore();
         vk::Fence createFence();
         vk::Fence createFenceSignaled();
+        vk::Event createEvent();
+        vk::Event createDeviceOnlyEvent();
 
         void waitFence(const vk::Fence &fence);
         void resetFence(vk::Fence fence);
+
+        [[nodiscard]] bool getEventStatus(const vk::Event& event);
+        void setEvent(const vk::Event& event);
+        void resetEvent(const vk::Event& event);
 
         struct OTCSync {
             vk::Semaphore signal, wait;
