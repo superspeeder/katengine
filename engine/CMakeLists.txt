@@ -10,7 +10,15 @@ find_package(glm CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(eventpp CONFIG REQUIRED)
 
-add_library(engine STATIC src/kat/core.hpp src/kat/core.cpp)
+add_library(engine STATIC src/kat/core.hpp src/kat/core.cpp
+        src/kat/os/os.hpp
+        src/kat/os/window.cpp
+        src/kat/os/window.hpp
+        src/kat/utils.hpp
+        src/kat/vulkan_wrapper/basics.hpp
+        src/kat/vulkan_wrapper/basics.cpp
+        src/kat/vulkan_wrapper/swapchain.cpp
+        src/kat/vulkan_wrapper/swapchain.hpp)
 target_include_directories(engine PUBLIC src/)
 target_link_libraries(engine PUBLIC Vulkan::Vulkan spdlog::spdlog glm::glm glfw eventpp::eventpp)
 target_compile_definitions(engine PUBLIC -DVULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 -DKATENGINE_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} -DKATENGINE_VERSION_MINOR=${PROJECT_VERSION_MINOR} -DKATENGINE_VERSION_PATCH=${PROJECT_VERSION_PATCH})
@@ -18,5 +26,9 @@ target_compile_definitions(engine PUBLIC -DVULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 
 target_compile_definitions(engine PUBLIC
         $<$<CONFIG:Debug>:KATENGINE_DEBUG>
 )
+
+if (WIN32)
+    target_link_libraries(engine PUBLIC Dwmapi.lib)
+endif()
 
 add_library(kat::engine ALIAS engine)
