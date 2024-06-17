@@ -94,6 +94,8 @@ namespace kat::vkw {
 
             m_Device = m_Gpu.createDevice(vk::DeviceCreateInfo({}, queueCreateInfos, {}, extensions, nullptr, &features), allocator);
             VULKAN_HPP_DEFAULT_DISPATCHER.init(m_Device);
+
+            m_MainQueue = m_Device.getQueue(m_MainQueueFamily, 0);
         }
     }
 

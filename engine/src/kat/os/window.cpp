@@ -150,4 +150,10 @@ namespace kat::os {
         m_Surface = surf;
         return m_Surface;
     }
+
+    vk::Extent2D Window::getInnerExtent() const {
+        int w, h;
+        glfwGetFramebufferSize(m_Window, &w, &h);
+        return vk::Extent2D{static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+    }
 } // namespace kat::os

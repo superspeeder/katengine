@@ -64,6 +64,8 @@ namespace kat::os {
 
         [[nodiscard]] const vk::SurfaceKHR& createVulkanSurface();
 
+        [[nodiscard]] vk::Extent2D getInnerExtent() const;
+
       private:
 
         GLFWwindow* m_Window;
