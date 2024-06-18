@@ -11,8 +11,8 @@ void runApplication() {
     kat::os::WindowConfiguration windowConfig{};
     windowConfig.title = "Hello!";
     windowConfig.mode.mode = kat::os::WindowModeType::WINDOWED;
-    windowConfig.mode.settings = kat::os::WindowedMode{.size = {800, 600}, .resizable = true};
-//    windowConfig.mode.mode = kat::os::WindowModeType::BORDERLESS_FULLSCREEN;
+    windowConfig.mode.settings = kat::os::WindowedMode{.size = {3840, 2160}, .resizable = false};
+//    windowConfig.mode.mode = kat::os::WindowModeType::EXCLUSIVE_FULLSCREEN;
 //    windowConfig.mode.settings = kat::os::FullscreenMode{.monitorId = 1ull};
 
     std::shared_ptr<kat::os::Window> window = std::make_shared<kat::os::Window>(windowConfig);
@@ -30,7 +30,7 @@ void runApplication() {
     double deltaTime = 1.0f / 60.f;
     double lastFrame = thisFrame - deltaTime;
 
-    while (!window->shouldClose()) {
+    std::function<void()> onRender = [&]() {
         easySwapchain->renderAndPresent([&](const vk::CommandBuffer &cmd, const kat::vkw::CurrentFrameInfo &cfi) {
             vk::ImageMemoryBarrier2 imb1{};
             imb1.srcAccessMask = vk::AccessFlagBits2::eNone;
@@ -63,11 +63,16 @@ void runApplication() {
             cmd.clearColorImage(cfi.image, vk::ImageLayout::eTransferDstOptimal, clearColor, subresourceRanges);
             cmd.pipelineBarrier2(vk::DependencyInfo({}, {}, {}, imb2));
         });
-        kat::os::Window::pollEvents();
-
         lastFrame = thisFrame;
         thisFrame = glfwGetTime();
         deltaTime = thisFrame - lastFrame;
+    };
+
+    window->setRenderFunction(onRender);
+
+    while (!window->shouldClose()) {
+        kat::os::Window::pollEvents();
+        onRender();
     }
 
     kat::vkw::context->device().waitIdle();

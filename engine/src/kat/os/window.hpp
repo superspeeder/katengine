@@ -2,6 +2,7 @@
 
 #include <string>
 #include <optional>
+#include <functional>
 #include <variant>
 
 #include <glm/glm.hpp>
@@ -66,10 +67,14 @@ namespace kat::os {
 
         [[nodiscard]] vk::Extent2D getInnerExtent() const;
 
+        void setRenderFunction(const std::function<void()>& function);
+
+
       private:
 
         GLFWwindow* m_Window;
         vk::SurfaceKHR m_Surface;
+        std::optional<std::function<void()>> m_OnRender;
     };
 
 } // namespace kat::os

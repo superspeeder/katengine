@@ -119,10 +119,21 @@ namespace kat::os {
         glfwWindowHint(GLFW_POSITION_Y, position.y);
 
         m_Window = glfwCreateWindow(size.x, size.y, configuration.title.c_str(), monitor, nullptr);
+        glfwSetWindowUserPointer(m_Window, this);
 
 #ifdef WIN32
         u_::fitTheme(m_Window);
 #endif
+
+        glfwSetWindowRefreshCallback(m_Window, +[](GLFWwindow* window) {
+            void* uptr = glfwGetWindowUserPointer(window);
+            if (uptr) {
+                auto* win = reinterpret_cast<Window*>(uptr);
+                if (win->m_OnRender.has_value()) {
+                    win->m_OnRender.value()();
+                }
+            }
+        });
     }
 
     bool Window::shouldClose() const {
@@ -155,5 +166,9 @@ namespace kat::os {
         int w, h;
         glfwGetFramebufferSize(m_Window, &w, &h);
         return vk::Extent2D{static_cast<uint32_t>(w), static_cast<uint32_t>(h)};
+    }
+
+    void Window::setRenderFunction(const std::function<void()> &function) {
+        m_OnRender = function;
     }
 } // namespace kat::os

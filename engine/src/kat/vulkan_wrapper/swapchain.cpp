@@ -74,7 +74,7 @@ namespace kat::vkw {
     }
 
     void Swapchain::recreateSwapchain() {
-        if (m_Swapchain != nullptr) {
+        if (m_Swapchain) {
             context->device().waitIdle(); // everything must stop first
             for (uint32_t i = 0; i < m_Images.size(); i++) {
                 destroy(m_ImageViews[i]);
@@ -128,8 +128,8 @@ namespace kat::vkw {
             size_t dist = SIZE_MAX;
             for (const auto &pm: presentModes) {
                 auto it = std::find(m_Preferences.presentModePreferences.begin(), m_Preferences.presentModePreferences.end(), pm);
-                if (it != presentModes.end()) {
-                    size_t d = std::distance(presentModes.begin(), it);
+                if (it != m_Preferences.presentModePreferences.end()) {
+                    size_t d = std::distance(m_Preferences.presentModePreferences.begin(), it);
                     if (d < dist) {
                         dist = d;
                         createInfo.presentMode = *it;
